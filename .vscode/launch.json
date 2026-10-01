@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:DownloadService.Swift}",
+            "name": "Debug DownloadService",
+            "target": "DownloadService",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug DownloadService"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:DownloadService.Swift}",
+            "name": "Release DownloadService",
+            "target": "DownloadService",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release DownloadService"
+        }
+    ]
+}
