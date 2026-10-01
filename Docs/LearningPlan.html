@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Learning Plan — DownloadService.Swift</title>
+  <style>
+    :root { color-scheme: light; --ink:#172b3a; --muted:#506270; --accent:#086d73; --line:#d6e1e5; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:#f4f7f8; color:var(--ink); font:17px/1.65 system-ui,sans-serif; }
+    main { max-width:1020px; margin:auto; padding:48px 28px 80px; }
+    header { border-top:6px solid var(--accent); padding:28px 0; }
+    h1 { font-size:clamp(2rem,5vw,3.4rem); line-height:1.12; margin:12px 0; }
+    h2 { line-height:1.25; margin-top:0; } h3 { font-size:1.1rem; margin-bottom:8px; }
+    a { color:#005c72; } code { font-family:Consolas,monospace; font-size:.9em; }
+    pre { background:#142c3a; color:#eff8fb; padding:20px; overflow-x:auto; border-radius:8px; line-height:1.5; }
+    section, article { background:white; padding:28px; border:1px solid var(--line); border-radius:12px; margin:22px 0; }
+    .eyebrow,.meta { color:var(--accent); font-weight:650; } .muted { color:var(--muted); }
+    .note { border-left:4px solid var(--accent); padding:12px 18px; background:#eaf5f3; }
+    li { margin:7px 0; } table { width:100%; border-collapse:collapse; } th,td { text-align:left; vertical-align:top; padding:12px 8px; border-bottom:1px solid var(--line); }
+    .table-wrap { overflow-x:auto; } nav ol { columns:2; column-gap:32px; } nav li { break-inside:avoid; }
+    @media(max-width:650px) { main { padding:24px 14px; } section,article { padding:20px; } nav ol { columns:1; } }
+    @media print { body { background:white; font-size:11pt; } main { padding:0; } pre { white-space:pre-wrap; overflow-wrap:anywhere; } article { break-inside:auto; } h2,h3 { break-after:avoid; } }
+  </style>
+</head>
+<body><main>
+<header>
+  <p class="eyebrow">SWIFT SERVICE ENGINEERING · GUIDED PRACTICE</p>
+  <h1>Learning Plan</h1>
+  <p>Build a small, dependable photo downloader while learning dependency injection, structured concurrency, and testing.</p>
+  <p class="muted">Created October 1, 2026 · 16 lessons · 30–60 minutes each · approximately 14 hours total</p>
+</header>
+
+<section aria-labelledby="agreement"><h2 id="agreement">How we will work</h2>
+<p><strong>You write the Swift.</strong> The assistant teaches, supplies examples, reviews your changes, and maintains these notes. It implements application code, tests, or build automation only when you explicitly request that.</p>
+<p>This is the curriculum, not a completed implementation. The snippets below preview the code you will write; some are intentionally incomplete fragments. At the start of each lesson we will explain the relevant syntax, expand the examples, and work through the exercise together.</p>
+<p>Each lesson uses the listed time budget, ends with a focused PR, and includes tests or a verification exercise. If a toolchain issue consumes the session, record it and resume the lesson next time rather than extending past 60 minutes.</p>
+<p>Starting point: <code>Package.swift</code> declares Swift tools 6.4, an executable target named <code>DownloadService</code>, and a test target using Swift Testing. Both targets enable <code>ApproachableConcurrency</code>. The entry point currently prints “Hello, world!”; the test is a placeholder. No implementation changes are part of this documentation step.</p>
+</section>
+
+<section><h2>The service we are building</h2>
+<p>A command-line program reads a JSON file, validates it, downloads a finite batch of random JPEG photos from Picsum, saves them to a configured directory, and reports success or failure. “Service” means a reusable application component here; running continuously or exposing an HTTP API is a later project.</p>
+<ul>
+<li><strong>Configuration:</strong> JSON first, because Foundation provides decoding without a YAML dependency. A checked-in example supplies safe defaults; a command-line path selects the actual file. Relative output paths resolve against the configuration file's directory.</li>
+<li><strong>Injection:</strong> construct dependencies explicitly at the entry point. Pass configuration values and protocol implementations through initializers. No DI framework is needed.</li>
+<li><strong>Concurrency:</strong> learn a single async download first, then bounded task groups, safe shared state, and cooperative cancellation.</li>
+<li><strong>Failure policy:</strong> initially fail the batch on the first error. Cancel remaining work, keep files already committed successfully, and report partial progress. Cancellation never triggers a retry. We will document races with already-finishing operations rather than promise rollback.</li>
+<li><strong>Limits:</strong> validate batch count, dimensions, concurrency, timeout, and maximum accepted response size. The first in-memory transport is educational; its post-download size check is not a hard network-memory limit. Lesson 14 addresses that limitation.</li>
+<li><strong>Testing:</strong> cover all owned decisions and failure paths. Coverage numbers help find gaps; they do not prove correctness or require testing Foundation internals.</li>
+</ul>
+<p>Picsum documents size-based random images, JPEG suffixes, and a <code>random</code> query parameter for avoiding cached repeats. That parameter does not guarantee unique photos. See the <a href="https://picsum.photos/">Picsum API examples</a>.</p>
+</section>
+
+<section><h2>Architecture we will grow into</h2>
+<pre aria-label="Dependency direction"><code>CLI / composition root
+  ├── JSON loader → validated configuration
+  └── DownloadCoordinator
+        └── PhotoDownloader
+              ├── PhotoSource ← PicsumPhotoSource
+              ├── HTTPClient  ← URLSessionHTTPClient
+              └── PhotoStore  ← DiskPhotoStore
+
+Tests inject controlled fakes at the same boundaries.</code></pre>
+<p>Arrows describe dependency relationships, not threads. Protocols describe capabilities the application needs; adapters translate networking and filesystem APIs into those capabilities. The coordinator schedules work; the downloader handles one photo. The entry point knows concrete types so the application logic does not have to.</p>
+<p>Keep one executable module initially. Folders communicate responsibilities without prematurely adding packages or targets. Introduce a library target only when reuse or testing constraints justify it. Use structs for immutable values and actors when mutable state genuinely crosses tasks.</p>
+<div class="table-wrap"><table><thead><tr><th>Planned location</th><th>Responsibility</th></tr></thead><tbody>
+<tr><td><code>Sources/DownloadService/DownloadService.swift</code></td><td>Arguments, composition, async entry point, final reporting.</td></tr>
+<tr><td><code>Configuration/</code></td><td>Raw JSON decoding, validation, path resolution. Below the source target.</td></tr>
+<tr><td><code>Domain/</code></td><td>Immutable request/result values and meaningful errors.</td></tr>
+<tr><td><code>Services/</code></td><td>Protocols, one-photo use case, bounded batch orchestration.</td></tr>
+<tr><td><code>Infrastructure/</code></td><td>Picsum URL construction, URLSession transport, disk persistence.</td></tr>
+<tr><td><code>Tests/DownloadServiceTests/</code></td><td>Behavior tests, local integration tests, and reusable test doubles.</td></tr>
+<tr><td><code>Config/example.json</code></td><td>Example runtime input; read from an explicit path, not silently bundled as a package resource.</td></tr>
+<tr><td><code>Docs/</code></td><td>HTML lessons, decisions, progress, and later operational notes.</td></tr>
+</tbody></table></div>
+<p class="muted">In the lesson file lists, source paths are relative to <code>Sources/DownloadService/</code> and test paths to <code>Tests/DownloadServiceTests/</code>, unless otherwise stated. These are planned files, not files created today.</p>
+</section>
+
+<section><h2>Lesson map</h2><nav aria-label="Lessons"><ol>
+<li><a href="#lesson-1">Establish a runnable baseline</a></li><li><a href="#lesson-2">Model configuration</a></li>
+<li><a href="#lesson-3">Load and inject configuration</a></li><li><a href="#lesson-4">Define boundaries and practice DI</a></li>
+<li><a href="#lesson-5">Build Picsum requests</a></li><li><a href="#lesson-6">Write the one-photo use case</a></li>
+<li><a href="#lesson-7">Implement async HTTP transport</a></li><li><a href="#lesson-8">Persist files safely</a></li>
+<li><a href="#lesson-9">Wire the real application</a></li><li><a href="#lesson-10">Learn isolation and Sendable</a></li>
+<li><a href="#lesson-11">Bound concurrent work</a></li><li><a href="#lesson-12">Handle cancellation and failure</a></li>
+<li><a href="#lesson-13">Add bounded retries</a></li><li><a href="#lesson-14">Control download resources</a></li>
+<li><a href="#lesson-15">Report useful outcomes</a></li><li><a href="#lesson-16">Automate checks and review readiness</a></li>
+</ol></nav></section>
+
+<article id="lesson-1"><p class="meta">01 · 30 minutes · 8 explain / 12 practice / 5 verify / 5 PR</p><h2>Establish a runnable baseline</h2>
+<p><strong>What and why:</strong> learn SwiftPM's source/test layout, tools version versus language mode, and the existing concurrency setting. Separate environment problems from code problems before adding behavior. Windows is the primary machine for this exercise.</p>
+<p><strong>Files:</strong> inspect <code>Package.swift</code>, the existing entry point, and <code>DownloadServiceTests.swift</code>. Update only the progress log unless an environment fix is explicitly agreed.</p>
+<pre><code>swift --version
+swift build
+swift test
+swift run DownloadService</code></pre>
+<p><strong>Your exercise:</strong> explain which target each file belongs to and why an empty test is not evidence of working download behavior. Identify the compiler version and prerequisites from actual output.</p>
+<p><strong>Done / PR:</strong> record the commands and results, including any toolchain blocker. A successful baseline prints the greeting and runs the placeholder test. PR: <code>lesson-01-baseline</code>; do not lower the package version simply to bypass a setup issue.</p>
+</article>
+
+<article id="lesson-2"><p class="meta">02 · 45 minutes · 10 explain / 20 implement / 10 test / 5 PR</p><h2>Model configuration as validated data</h2>
+<p><strong>What and why:</strong> distinguish decoding (is the JSON shaped correctly?) from validation (are the values safe to use?). An immutable validated value prevents repeated checks throughout the service.</p>
+<p><strong>Files:</strong> create <code>Configuration/RawConfiguration.swift</code> for <code>Decodable</code> input, <code>Configuration/DownloadConfiguration.swift</code> for validated values and validation errors, root <code>Config/example.json</code>, and <code>ConfigurationTests.swift</code>.</p>
+<pre><code>{
+  "photoCount": 5, "width": 800, "height": 600,
+  "outputDirectory": "../Downloads", "maxConcurrentDownloads": 2,
+  "timeoutSeconds": 30, "maxImageBytes": 10485760
+}
+
+struct RawConfiguration: Decodable {
+    let photoCount: Int
+    let width: Int
+    // Exercise: declare the remaining JSON fields.
+}
+
+// Planned validation boundary:
+// init(raw: RawConfiguration, relativeTo directory: URL) throws</code></pre>
+<p><strong>Your exercise:</strong> choose and document bounds (starting proposal: count 1–100, dimensions 1–4096, concurrency 1–8 and no greater than count, timeout 1–120 seconds, size 1–20 MiB). Keep the base URL fixed to HTTPS Picsum for this scope. Explain <code>let</code>, structs, throwing initializers, and why the JSON shape is separate from validated state.</p>
+<p><strong>Tests / PR:</strong> table-driven tests for valid values, zero, negative, and upper bounds; missing and wrong-type fields; relative and absolute output paths. PR: <code>lesson-02-configuration-model</code>.</p>
+</article>
+
+<article id="lesson-3"><p class="meta">03 · 45 minutes · 10 explain / 20 implement / 10 test / 5 PR</p><h2>Load configuration at the edge</h2>
+<p><strong>What and why:</strong> the program reads configuration once. Business logic receives values, not a filename or a global singleton. Inject a small reading function to test missing files without touching disk.</p>
+<p><strong>Files:</strong> create <code>Configuration/ConfigurationLoader.swift</code> and <code>ConfigurationLoaderTests.swift</code>. Keep argument parsing for lesson 9.</p>
+<pre><code>struct ConfigurationLoader {
+    let read: (URL) throws -&gt; Data
+
+    func load(from url: URL) throws -&gt; DownloadConfiguration {
+        let bytes = try read(url)
+        let raw = try JSONDecoder().decode(RawConfiguration.self, from: bytes)
+        return try DownloadConfiguration(
+            raw: raw, relativeTo: url.deletingLastPathComponent()
+        )
+    }
+}
+// In a test: ConfigurationLoader(read: { _ in fixtureData })</code></pre>
+<p><strong>Your exercise:</strong> import Foundation, connect decoding to validation, and add useful context to file/decoding errors without hiding the original cause. Compare closure injection here with protocol injection in the next lesson.</p>
+<p><strong>Tests / PR:</strong> a supplied JSON fixture, malformed JSON, missing-file error, and validation failure. Check that resolution uses the config directory, not a test runner's current directory. PR: <code>lesson-03-config-loading</code>.</p>
+</article>
+
+<article id="lesson-4"><p class="meta">04 · 45 minutes · 10 explain / 20 implement / 10 test / 5 PR</p><h2>Define dependencies around capabilities</h2>
+<p><strong>What and why:</strong> protocols make external effects replaceable. Constructor injection makes dependencies visible and mandatory. Do not create a protocol for every struct.</p>
+<p><strong>Files:</strong> create <code>Domain/PhotoRequest.swift</code>, <code>Domain/HTTPPayload.swift</code>, and <code>Services/PhotoSource.swift</code>, <code>HTTPClient.swift</code>, <code>PhotoStore.swift</code>. Create <code>TestDoubles/StubHTTPClient.swift</code> and a focused boundary test.</p>
+<pre><code>struct HTTPPayload: Sendable {
+    let data: Data
+    let statusCode: Int
+    let contentType: String?
+}
+
+protocol HTTPClient: Sendable {
+    func get(_ url: URL) async throws -&gt; HTTPPayload
+}
+protocol PhotoSource: Sendable {
+    func url(for request: PhotoRequest) throws -&gt; URL
+}
+protocol PhotoStore: Sendable {
+    func save(_ data: Data, named name: String) async throws -&gt; URL
+}</code></pre>
+<p><strong>Your exercise:</strong> define an immutable request with an index and dimensions. Write an immutable HTTP stub returning a known payload and an async test that calls it through <code>any HTTPClient</code>. Explain protocol versus concrete type, <code>any</code>, <code>async throws</code>, and why these dependencies must safely cross concurrency boundaries later.</p>
+<p><strong>Tests / PR:</strong> verify stub return and error paths; this is a language exercise, not a substitute for use-case tests. PR: <code>lesson-04-dependency-contracts</code>.</p>
+</article>
+
+<article id="lesson-5"><p class="meta">05 · 30 minutes · 8 explain / 12 implement / 5 test / 5 PR</p><h2>Turn requests into Picsum URLs</h2>
+<p><strong>What and why:</strong> vendor-specific URL details belong in an adapter. Keep URL generation deterministic so it is testable without HTTP.</p>
+<p><strong>Files:</strong> create <code>Infrastructure/PicsumPhotoSource.swift</code> and <code>PicsumPhotoSourceTests.swift</code>.</p>
+<pre><code>// Fragment inside url(for:); configuration has validated dimensions.
+var parts = URLComponents(string: "https://picsum.photos")!
+parts.path = "/\(request.width)/\(request.height).jpg"
+parts.queryItems = [
+    URLQueryItem(name: "random", value: String(request.index))
+]
+// Exercise: return parts.url using a meaningful error if construction fails.</code></pre>
+<p><strong>Your exercise:</strong> explain why the literal base URL is known-valid, and how to avoid forced unwraps when input is not known. The request index varies URLs within a batch; choose a batch token later if cross-run cache busting is needed. Do not assert distinct image content.</p>
+<p><strong>Tests / PR:</strong> verify scheme, host, dimensions, JPEG suffix, and query items using parsed components. PR: <code>lesson-05-picsum-source</code>.</p>
+</article>
+
+<article id="lesson-6"><p class="meta">06 · 60 minutes · 10 explain / 25 implement / 20 test / 5 PR</p><h2>Implement one photo using only fakes</h2>
+<p><strong>What and why:</strong> connect URL generation, fetching, validation, and saving before adding real I/O. This is the central example of DI: the same application logic will run with fakes and production adapters.</p>
+<p><strong>Files:</strong> create <code>Services/PhotoDownloader.swift</code>, <code>Domain/DownloadError.swift</code>, <code>Domain/SavedPhoto.swift</code>, <code>PhotoDownloaderTests.swift</code>, and <code>TestDoubles/RecordingPhotoStore.swift</code>.</p>
+<pre><code>struct PhotoDownloader: Sendable {
+    let source: any PhotoSource
+    let http: any HTTPClient
+    let store: any PhotoStore
+    let maxImageBytes: Int
+
+    func download(_ request: PhotoRequest) async throws -&gt; SavedPhoto {
+        let url = try source.url(for: request)
+        let payload = try await http.get(url)
+        // Exercise: validate status, MIME type, nonempty body, size;
+        // save using a locally generated name and return a result.
+    }
+}</code></pre>
+<p><strong>Your exercise:</strong> accept only successful HTTP responses and JPEG content (handle MIME parameters/case). Explain why a MIME header is not proof of valid image bytes. Generate filenames from trusted batch/index values, never from remote headers. The recording store should be an actor so later parallel tests stay safe.</p>
+<p><strong>Tests / PR:</strong> success saves exact bytes; non-2xx, wrong/missing MIME, empty/oversized data, source/HTTP/store failure all have meaningful outcomes. Verify invalid payloads are never saved. PR: <code>lesson-06-single-photo</code>.</p>
+</article>
+
+<article id="lesson-7"><p class="meta">07 · 60 minutes · 15 explain / 20 implement / 20 test / 5 PR</p><h2>Use async/await with URLSession</h2>
+<p><strong>What and why:</strong> <code>await</code> permits suspension; it does not by itself create parallel downloads. Keep HTTP response translation in the transport adapter and payload policy in the downloader.</p>
+<p><strong>Files:</strong> create <code>Infrastructure/URLSessionHTTPClient.swift</code> and <code>URLSessionHTTPClientTests.swift</code>. Add a small injected loading closure or transport seam if needed to test response mapping on Windows without a real server.</p>
+<pre><code>import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+
+// Fragment in the adapter; session is injected and timeout configured.
+let (data, response) = try await session.data(from: url)
+guard let http = response as? HTTPURLResponse else {
+    throw DownloadError.invalidResponse
+}
+return HTTPPayload(data: data, statusCode: http.statusCode,
+    contentType: http.value(forHTTPHeaderField: "Content-Type"))</code></pre>
+<p><strong>Your exercise:</strong> configure timeout and cache behavior at session construction, inspect redirect behavior, and explain <code>try await</code>. Let transport errors propagate with useful context. Do not assume Apple-only test interception APIs work on the installed Windows Foundation.</p>
+<p><strong>Tests / PR:</strong> response mapping, non-HTTP response, transport error, and timeout propagation through an injected loader. Run an optional live one-photo check separately from unit tests. Record actual platform support. PR: <code>lesson-07-http-adapter</code>.</p>
+</article>
+
+<article id="lesson-8"><p class="meta">08 · 60 minutes · 10 explain / 25 implement / 20 test / 5 PR</p><h2>Persist complete files safely</h2>
+<p><strong>What and why:</strong> filenames, directory creation, overwrite policy, and partial files are storage concerns. Use a unique directory per run and deterministic names within it to prevent collisions across invocations.</p>
+<p><strong>Files:</strong> create <code>Infrastructure/DiskPhotoStore.swift</code> and <code>DiskPhotoStoreTests.swift</code>. Keep the store responsible for its root directory; use injected roots in tests.</p>
+<pre><code>actor DiskPhotoStore: PhotoStore {
+    let directory: URL
+    // Exercise: initializer and directory setup.
+
+    func save(_ data: Data, named name: String) async throws -&gt; URL {
+        // Validate a simple leaf name; reject paths and traversal.
+        let destination = directory.appendingPathComponent(name)
+        try data.write(to: destination, options: .atomic)
+        return destination
+    }
+}</code></pre>
+<p><strong>Your exercise:</strong> complete safe leaf-name validation and the no-overwrite policy within a unique run directory. Atomic writing avoids exposing partially written files; it does not by itself enforce no-overwrite or guarantee durability after power loss. Actor isolation protects state, but synchronous disk writes still block the executing thread; keep this initial version limited to small images.</p>
+<p><strong>Tests / PR:</strong> use unique temporary directories with cleanup. Verify saved bytes, missing directory creation, invalid names, duplicates, and a deterministic failure such as using a file as a parent directory. These are local filesystem integration tests; downloader unit tests continue using fakes. PR: <code>lesson-08-disk-storage</code>.</p>
+</article>
+
+<article id="lesson-9"><p class="meta">09 · 45 minutes · 10 explain / 20 implement / 10 test / 5 PR</p><h2>Compose and run the real application</h2>
+<p><strong>What and why:</strong> the composition root is the one place that selects real adapters. Keep argument parsing separately testable and let a small async entry point delegate work.</p>
+<p><strong>Files:</strong> update <code>DownloadService.swift</code>; create <code>Configuration/CommandLineOptions.swift</code>, <code>Services/DownloadApplication.swift</code>, and their tests. Update root <code>.gitignore</code> for generated downloads when you implement this lesson.</p>
+<pre><code>// Composition sketch, inside an async throwing application boundary:
+let config = try loader.load(from: options.configURL)
+let downloader = PhotoDownloader(
+    source: PicsumPhotoSource(),
+    http: URLSessionHTTPClient(session: session),
+    store: store,
+    maxImageBytes: config.maxImageBytes
+)
+for request in requests {
+    _ = try await downloader.download(request)
+}
+
+// Run from the repository root:
+// swift run DownloadService --config Config/example.json</code></pre>
+<p><strong>Your exercise:</strong> construct the session, run directory, and requests explicitly. Inject a run identifier where deterministic filenames matter in tests. Keep this batch sequential so the next lessons make concurrency's effects visible.</p>
+<p><strong>Tests / PR:</strong> missing/unknown arguments, config selection, sequential orchestration using fakes, and propagation of a failure. Opt-in smoke check: a small real batch writes files to the expected directory. PR: <code>lesson-09-composition-root</code>.</p>
+</article>
+
+<article id="lesson-10"><p class="meta">10 · 45 minutes · 15 explain / 15 implement / 10 test / 5 PR</p><h2>Understand isolation before adding tasks</h2>
+<p><strong>What and why:</strong> learn which values may cross task boundaries and where mutable state lives. Discuss actor reentrancy: an actor can process another operation while one method is suspended.</p>
+<p><strong>Files:</strong> review existing source types for sendability; create <code>TestDoubles/ConcurrencyProbe.swift</code> and <code>ConcurrencyProbeTests.swift</code>.</p>
+<pre><code>actor ConcurrencyProbe {
+    private(set) var active = 0
+    private(set) var peak = 0
+
+    func started() {
+        active += 1
+        peak = max(peak, active)
+    }
+    func finished() { active -= 1 }
+}</code></pre>
+<p><strong>Your exercise:</strong> deliberately inspect one unsafe shared-mutation example in a scratch discussion, then explain the compiler's objection. Keep the final code safe. Examine how the package's actual concurrency setting affects isolation instead of changing settings or adding <code>@unchecked Sendable</code> to make errors disappear.</p>
+<p><strong>Tests / PR:</strong> verify probe accounting and actor access with <code>await</code>. Each test owns its own probe; no shared global recordings. PR: <code>lesson-10-isolation</code>.</p>
+</article>
+
+<article id="lesson-11"><p class="meta">11 · 60 minutes · 15 explain / 25 implement / 15 test / 5 PR</p><h2>Run a bounded number of downloads</h2>
+<p><strong>What and why:</strong> a task per photo starts too much work for large batches. A sliding window starts at most the configured limit, replacing one task whenever a result completes.</p>
+<p><strong>Files:</strong> create <code>Services/DownloadCoordinator.swift</code>, <code>DownloadCoordinatorTests.swift</code>, and a gated test downloader; replace the sequential loop in <code>DownloadApplication.swift</code>.</p>
+<pre><code>// Algorithm sketch; expand together in the lesson.
+try await withThrowingTaskGroup(of: SavedPhoto.self) { group in
+    // Submit min(limit, requests.count) initial children.
+    while let result = try await group.next() {
+        results.append(result) // Only the parent mutates results.
+        // Submit one next request if any remain.
+    }
+}
+// Sort by request index if the public result order must be stable.</code></pre>
+<p><strong>Your exercise:</strong> use a <code>@Sendable</code> async throwing operation closure to inject one-photo work into the coordinator. Keep scheduling independent of networking. Explain why completion order differs from input order and why an actor for the parent-owned result array is unnecessary.</p>
+<p><strong>Tests / PR:</strong> use actor-controlled gates, not sleeps, to prove peak work never exceeds the limit and that concurrency actually reaches two when permitted. Cover count less than limit, limit one, all requests executed exactly once, and stable results. Release all gates even when a test fails. PR: <code>lesson-11-bounded-concurrency</code>.</p>
+</article>
+
+<article id="lesson-12"><p class="meta">12 · 60 minutes · 15 explain / 20 implement / 20 test / 5 PR</p><h2>Make cancellation and partial failure explicit</h2>
+<p><strong>What and why:</strong> cancellation is cooperative. A throwing task group cancels children when an error escapes its body, but waits for them to finish. Dependencies must cooperate; cancellation is not instant rollback.</p>
+<p><strong>Files:</strong> update downloader, coordinator, HTTP adapter, their tests, and cancellation-aware test gates. Add <code>Domain/BatchFailure.swift</code> for structured partial outcomes if needed.</p>
+<pre><code>try Task.checkCancellation()
+let payload = try await http.get(url)
+try Task.checkCancellation()
+// Validate before attempting persistence.
+let savedURL = try await store.save(payload.data, named: name)</code></pre>
+<p><strong>Your exercise:</strong> check cancellation before submitting replacement tasks and before persistence. Normalize transport cancellation at the application boundary when appropriate. Keep successfully saved files and report them even when another child fails; design result accounting so late successes are not silently lost during cancellation.</p>
+<p><strong>Tests / PR:</strong> cancellation before start, during an awaited transport, and before save; first-error sibling cancellation; preserved committed files. Use cancellation-aware continuations/gates with exactly-once resume and a bounded test timeout as a deadlock guard. No wall-clock timing assertions. Programmatic task cancellation comes first; cross-platform Ctrl+C signal integration is a separate extension. PR: <code>lesson-12-cancellation</code>.</p>
+</article>
+
+<article id="lesson-13"><p class="meta">13 · 60 minutes · 10 explain / 25 implement / 20 test / 5 PR</p><h2>Add small, testable retry behavior</h2>
+<p><strong>What and why:</strong> retry only transient failures, with bounded attempts and delay. Keep retry policy outside storage so a disk failure never causes another network download.</p>
+<p><strong>Files:</strong> create <code>Infrastructure/RetryingHTTPClient.swift</code>, <code>Services/RetryPolicy.swift</code>, and <code>RetryingHTTPClientTests.swift</code>; extend configuration and its tests with explicit retry limits.</p>
+<pre><code>struct RetryingHTTPClient: HTTPClient {
+    let wrapped: any HTTPClient
+    let policy: RetryPolicy
+    let sleep: @Sendable (Duration) async throws -&gt; Void
+    // Exercise: bounded attempt loop with cancellation checks.
+}
+// Production delay: { try await Task.sleep(for: $0) }
+// Test delay: record the requested duration without waiting.</code></pre>
+<p><strong>Your exercise:</strong> start with at most three attempts for selected transport failures and 502/503/504. Never retry cancellation or ordinary 4xx responses. A random-image GET can return a different photo on retry; there is no promise of image identity. Defer 429/Retry-After and jitter until their behavior is explicitly designed.</p>
+<p><strong>Tests / PR:</strong> success on first attempt, transient then success, exhausted attempts, permanent error, cancellation during backoff, and exact delay sequence. PR: <code>lesson-13-retry-policy</code>.</p>
+</article>
+
+<article id="lesson-14"><p class="meta">14 · 60 minutes · 15 explain / 20 implement / 20 test / 5 PR</p><h2>Reduce memory pressure and own temporary files</h2>
+<p><strong>What and why:</strong> buffering every image as <code>Data</code> scales poorly. A post-response size check rejects oversized content only after buffering it. Explore file-backed URLSession downloads and the available Windows API before selecting the adapter.</p>
+<p><strong>Files:</strong> evolve <code>HTTPPayload.swift</code>, <code>HTTPClient.swift</code>, transport/retry adapters, and <code>PhotoStore.swift</code> to exchange an owned temporary-file result; update affected fakes and tests. Keep the old adapter until the new contract works.</p>
+<pre><code>// Proposed replacement for an in-memory payload:
+struct DownloadedFile: Sendable {
+    let temporaryURL: URL
+    let statusCode: Int
+    let contentType: String?
+    let byteCount: Int64
+}
+// Desired ownership rule:
+// transport creates → downloader validates → store commits
+// downloader removes any uncommitted temporary file on every exit.</code></pre>
+<p><strong>Your exercise:</strong> confirm the installed Foundation supports the chosen download API. Write down who deletes files on rejected responses, retries, cancellation, and success. File-backed downloads reduce memory use but do not cap disk/network consumption automatically. A strict transfer-byte ceiling requires a delegate/streaming implementation that cancels while receiving data; treat that as a follow-up lesson if it exceeds this session.</p>
+<p><strong>Tests / PR:</strong> fake temporary files cover successful commit, rejected size, retry cleanup, cancellation, and storage failure. Verify no temporary files remain. Record measured or unverified resource limits honestly; do not claim a hard cap unless implemented and checked. PR: <code>lesson-14-resource-management</code>.</p>
+</article>
+
+<article id="lesson-15"><p class="meta">15 · 45 minutes · 10 explain / 20 implement / 10 test / 5 PR</p><h2>Report outcomes without hiding failures</h2>
+<p><strong>What and why:</strong> a useful service explains what happened. Domain results should carry enough context for diagnostics without printing from deep inside every component.</p>
+<p><strong>Files:</strong> create <code>Domain/BatchReport.swift</code>, <code>Services/ReportFormatter.swift</code>, and <code>ReportFormatterTests.swift</code>; update application/entry-point handling. Create root <code>Docs/Operations.html</code> during this lesson.</p>
+<pre><code>struct BatchReport: Sendable {
+    let requested: Int
+    let saved: [SavedPhoto]
+    let failedCount: Int
+    let cancelledCount: Int
+    let notStartedCount: Int
+}
+// Output example:
+// Requested 5; saved 2; failed 1; cancelled 1; not started 1.</code></pre>
+<p><strong>Your exercise:</strong> define disjoint outcome categories whose counts add up. Include file locations and failure context. Keep formatting pure; inject an output function at the edge. Define successful versus failed process exit behavior without terminating a unit-test process. Document config, output paths, retries, cleanup, partial success, and known limits.</p>
+<p><strong>Tests / PR:</strong> complete success, mixed/partial outcomes, cancellation, config errors, report accounting, and exit-code mapping. CLI integration checks cover actual process behavior. PR: <code>lesson-15-reporting</code>.</p>
+</article>
+
+<article id="lesson-16"><p class="meta">16 · 60 minutes · 10 explain / 20 implement / 25 verify / 5 PR</p><h2>Automate verification and assess readiness</h2>
+<p><strong>What and why:</strong> PR checks make the same expectations visible to every contributor. Evaluate the service against explicit acceptance criteria instead of equating “enterprise grade” with the number of layers.</p>
+<p><strong>Files:</strong> you create root <code>.github/workflows/swift.yml</code> and <code>.github/pull_request_template.md</code>; update this plan and operations notes. Verify available Swift 6.4 toolchains/runners at implementation time; do not invent action versions or silently change the tools version.</p>
+<pre><code># Commands the workflow should run after verified toolchain setup:
+swift --version
+swift build
+swift test
+swift test --enable-code-coverage
+
+# PR notes:
+# Behavior learned / design choices / checks / known limitations</code></pre>
+<p><strong>Your exercise:</strong> make Windows the required platform for this exercise and add macOS when a compatible runner is available. Keep live Picsum calls out of required tests. Use coverage output to locate untested branches; report platform/tool support if collection is unavailable.</p>
+<p><strong>Tests / PR:</strong> a clean checkout builds and runs deterministic tests; success and failure paths are covered; limits and cancellation are tested; no generated downloads or secrets are committed. Run a separate, opt-in small Picsum smoke test. PR: <code>lesson-16-ci-and-readiness</code>.</p>
+<p><strong>Readiness boundary:</strong> this curriculum teaches production practices for a small finite-batch tool. Strict streaming byte limits, continuous operation, signal handling, telemetry backends, deployment, and image decoding/security validation need separately scoped work before requirements depending on them can be claimed.</p>
+</article>
+
+<section><h2>Our PR routine</h2><ol>
+<li>Begin from the agreed base with a clean understanding of existing changes. Create a focused <code>codex/lesson-NN-topic</code> branch.</li>
+<li>Explain the lesson, write a behavioral test, implement the smallest working behavior, and review it together.</li>
+<li>Run relevant checks. Record exact outcomes and any environment limitations; examples in this document are not pre-verified implementations.</li>
+<li>Update the HTML progress entry with your takeaway, design decision, and remaining question.</li>
+<li>Open a focused GitHub PR. Use a draft when work or verification is incomplete. Review before merging; merge only when you explicitly instruct it. Start the next dependent lesson from the agreed merged base or document its dependency.</li>
+</ol><p>Documentation setup is step 0. All implementation lessons remain pending until you complete them.</p></section>
+
+<section><h2>Progress log</h2><div class="table-wrap"><table><thead><tr><th>Step / date</th><th>Status</th><th>Evidence and next action</th></tr></thead><tbody>
+<tr><td>0 · October 1, 2026</td><td>Documentation ready; PR blocked</td><td>Inspected the bootstrap; created this plan and AGENTS.md. Checked balanced HTML tags, unique IDs, internal links, and all 16 lesson sections. GitHub CLI reports invalid credentials, so no PR has been opened. Re-authenticate with <code>gh auth login -h github.com</code> before publishing this step.</td></tr>
+<tr><td>1–16</td><td>Not started</td><td>The learner has not implemented these lessons. Begin with the Windows baseline.</td></tr>
+</tbody></table></div><p><strong>Baseline observation:</strong> the installed Swift executable failed during <code>swift --version</code> with a duplicate <code>PATH</code> process-environment key error. Application compilation and tests have not been verified. Investigate this environment issue in lesson 1; do not infer that the bootstrap source is faulty.</p><p>For each completed lesson record: date, PR link, actual checks, your explanation of the main concept, and unresolved questions. Do not mark completion merely because an example exists.</p></section>
+
+<section><h2>Primary references</h2><ul>
+<li><a href="https://picsum.photos/">Picsum documentation</a> — endpoint shape, image format, and cache-busting parameters.</li>
+<li><a href="https://www.swift.org/getting-started/">Swift getting started</a> — SwiftPM and supported development platforms.</li>
+<li><a href="https://docs.swift.org/swift-book/LanguageGuide/Concurrency.html">The Swift Programming Language: Concurrency</a> — suspension, structured tasks, isolation, and cancellation.</li>
+<li><a href="https://docs.swift.org/latest/documentation/swift/taskgroup/">TaskGroup reference</a> — child-task lifetime and structured concurrency.</li>
+<li><a href="https://docs.swift.org/latest/documentation/swift/sendable/">Sendable reference</a> — values crossing concurrency domains.</li>
+<li><a href="https://developer.apple.com/xcode/swift-testing">Swift Testing overview</a> — command-line testing, parameterized tests, and platform support.</li>
+</ul><p class="muted">API availability and compiler behavior must be checked against the installed Swift 6.4 toolchain when each lesson is implemented.</p></section>
+</main></body></html>
