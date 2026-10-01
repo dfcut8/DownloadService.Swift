@@ -65,15 +65,16 @@ Tests inject controlled fakes at the same boundaries.</code></pre>
 <p>Keep one executable module initially. Folders communicate responsibilities without prematurely adding packages or targets. Introduce a library target only when reuse or testing constraints justify it. Use structs for immutable values and actors when mutable state genuinely crosses tasks.</p>
 <div class="table-wrap"><table><thead><tr><th>Planned location</th><th>Responsibility</th></tr></thead><tbody>
 <tr><td><code>Sources/DownloadService/DownloadService.swift</code></td><td>Arguments, composition, async entry point, final reporting.</td></tr>
-<tr><td><code>Configuration/</code></td><td>Raw JSON decoding, validation, path resolution. Below the source target.</td></tr>
-<tr><td><code>Domain/</code></td><td>Immutable request/result values and meaningful errors.</td></tr>
-<tr><td><code>Services/</code></td><td>Protocols, one-photo use case, bounded batch orchestration.</td></tr>
-<tr><td><code>Infrastructure/</code></td><td>Picsum URL construction, URLSession transport, disk persistence.</td></tr>
+<tr><td><code>Sources/DownloadService/Configuration/</code></td><td>Raw JSON decoding, validation, path resolution.</td></tr>
+<tr><td><code>Sources/DownloadService/Domain/</code></td><td>Immutable request/result values and meaningful errors.</td></tr>
+<tr><td><code>Sources/DownloadService/Services/</code></td><td>Protocols, one-photo use case, bounded batch orchestration.</td></tr>
+<tr><td><code>Sources/DownloadService/Infrastructure/</code></td><td>Picsum URL construction, URLSession transport, disk persistence.</td></tr>
 <tr><td><code>Tests/DownloadServiceTests/</code></td><td>Behavior tests, local integration tests, and reusable test doubles.</td></tr>
 <tr><td><code>Config/example.json</code></td><td>Example runtime input; read from an explicit path, not silently bundled as a package resource.</td></tr>
 <tr><td><code>Docs/</code></td><td>HTML lessons, decisions, progress, and later operational notes.</td></tr>
 </tbody></table></div>
-<p class="muted">In the lesson file lists, source paths are relative to <code>Sources/DownloadService/</code> and test paths to <code>Tests/DownloadServiceTests/</code>, unless otherwise stated. These are planned files, not files created today.</p>
+<p><strong>Directory rule:</strong> all application source code belongs under <code>Sources/</code>. All tests, test doubles, test helpers, and test fixtures belong under <code>Tests/</code>. This applies to unit, integration, and smoke tests alike.</p>
+<p class="muted">In the lesson file lists, abbreviated source paths are relative to <code>Sources/DownloadService/</code> and abbreviated test paths to <code>Tests/DownloadServiceTests/</code>. For example, <code>TestDoubles/StubHTTPClient.swift</code> means <code>Tests/DownloadServiceTests/TestDoubles/StubHTTPClient.swift</code>. Repository metadata, runtime configuration, and documentation retain their explicitly listed locations. These are planned files, not files created today.</p>
 </section>
 
 <section><h2>Lesson map</h2><nav aria-label="Lessons"><ol>
@@ -370,7 +371,7 @@ swift test --enable-code-coverage
 </ol><p>Documentation setup is step 0. All implementation lessons remain pending until you complete them.</p></section>
 
 <section><h2>Progress log</h2><div class="table-wrap"><table><thead><tr><th>Step / date</th><th>Status</th><th>Evidence and next action</th></tr></thead><tbody>
-<tr><td>0 · October 1, 2026</td><td>Documentation ready; PR blocked</td><td>Inspected the bootstrap; created this plan and AGENTS.md. Checked balanced HTML tags, unique IDs, internal links, and all 16 lesson sections. GitHub CLI reports invalid credentials, so no PR has been opened. Re-authenticate with <code>gh auth login -h github.com</code> before publishing this step.</td></tr>
+<tr><td>0 · October 1, 2026</td><td>Documentation reviewed; PR preparation</td><td>Inspected the bootstrap; created this plan and AGENTS.md. Checked balanced HTML tags, unique IDs, internal links, and all 16 lesson sections. The learner approved the plan and the Sources/Tests directory rule. GitHub authentication was verified with network access; the earlier restricted-environment credential error was misleading.</td></tr>
 <tr><td>1–16</td><td>Not started</td><td>The learner has not implemented these lessons. Begin with the Windows baseline.</td></tr>
 </tbody></table></div><p><strong>Baseline observation:</strong> the installed Swift executable failed during <code>swift --version</code> with a duplicate <code>PATH</code> process-environment key error. Application compilation and tests have not been verified. Investigate this environment issue in lesson 1; do not infer that the bootstrap source is faulty.</p><p>For each completed lesson record: date, PR link, actual checks, your explanation of the main concept, and unresolved questions. Do not mark completion merely because an example exists.</p></section>
 
